@@ -1,0 +1,55 @@
+# Builds YOUR Switch-OS (Nintendo Switch HOME-menu style userland for the NumWorks n0120) with its
+# one-click Mac installer.
+#
+# It only runs in a PRIVATE copy of this repository ("Use this template" ->
+# Private). The firmware is compiled from NumWorks' own sources for you, in
+# your account; it must not end up downloadable by everyone, which is what a
+# public repository would do with it.
+#
+# Actions tab -> "Build Switch-OS" -> Run workflow. About 10 minutes, then
+# download Switch-OS at the bottom of the run's page.
+name: Build Switch-OS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  private-only:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that this copy is private
+        if: ${{ !github.event.repository.private }}
+        run: |
+          echo "::error::Ce dépôt est public. Crée une copie PRIVÉE (bouton « Use this template » > Private) et lance la compilation dedans."
+          exit 1
+
+  build:
+    needs: private-only
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the NumWorks SDK (Linux)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y build-essential git imagemagick libfreetype6-dev \
+            libjpeg-dev libpng-dev pkg-config python3-venv zip \
+            gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+          arm-none-eabi-gcc --version | head -1
+          make --version | head -1
+      - name: Download Epsilon, apply the Switch-OS patch, compile
+        run: ./scripts/build-firmware.sh
+      - name: Package the installer
+        run: |
+          mkdir -p dist/Switch-OS
+          cp -R installer/. dist/Switch-OS/
+          cp docs/LISEZMOI.txt dist/Switch-OS/
+          rm -rf dist/Switch-OS/games/*.nwa dist/Switch-OS/__pycache__
+          chmod +x "dist/Switch-OS/Installer Switch-OS.command" dist/Switch-OS/*.py
+          (cd dist && zip -qr Switch-OS.zip Switch-OS)
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Switch-OS
+          retention-days: 7
+          path: dist/Switch-OS.zip
