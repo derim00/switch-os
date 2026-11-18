@@ -4,6 +4,7 @@ installer/firmware/
 installer/numworks/
 installer/games/*.nwa
 dist/
+build/
 .build.log
 *.log
 

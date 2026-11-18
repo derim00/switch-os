@@ -1,13 +1,18 @@
-# Builds YOUR Switch-OS (Nintendo Switch HOME-menu style userland for the NumWorks n0120) with its
-# one-click Mac installer.
+# Builds YOUR Switch-OS (Nintendo Switch HOME-menu style userland for the NumWorks n0120)
+# with its one-click installers for Mac and for Windows (a .exe, nothing to
+# install on the PC).
 #
 # It only runs in a PRIVATE copy of this repository ("Use this template" ->
 # Private). The firmware is compiled from NumWorks' own sources for you, in
 # your account; it must not end up downloadable by everyone, which is what a
 # public repository would do with it.
 #
-# Actions tab -> "Build Switch-OS" -> Run workflow. About 10 minutes, then
-# download Switch-OS at the bottom of the run's page.
+# Games: put .nwa files in the games/ folder of your private copy, they are
+# pre-linked for slot B and shipped with both installers.
+#
+# Actions tab -> "Build Switch-OS" -> Run workflow. About 15 minutes, then
+# download Switch-OS-Mac or Switch-OS-Windows at the bottom of the run's
+# page.
 name: Build Switch-OS
 
 on:
@@ -39,17 +44,55 @@ jobs:
           make --version | head -1
       - name: Download Epsilon, apply the Switch-OS patch, compile
         run: ./scripts/build-firmware.sh
-      - name: Package the installer
+      - name: Package the Mac installer
         run: |
-          mkdir -p dist/Switch-OS
-          cp -R installer/. dist/Switch-OS/
-          cp docs/LISEZMOI.txt dist/Switch-OS/
-          rm -rf dist/Switch-OS/games/*.nwa dist/Switch-OS/__pycache__
-          chmod +x "dist/Switch-OS/Installer Switch-OS.command" dist/Switch-OS/*.py
-          (cd dist && zip -qr Switch-OS.zip Switch-OS)
-          ls -la dist
+          set -e
+          out=dist/Switch-OS-Mac/Switch-OS
+          mkdir -p "$out"
+          cp -R installer/firmware installer/numworks installer/games "$out/"
+          cp installer/server.py installer/dfu_launch.py installer/link_games.py \
+             installer/index.html "installer/Installer Switch-OS.command" "$out/"
+          cp docs/LISEZMOI.txt "$out/"
+          rm -rf "$out/__pycache__" "$out/games/.gitkeep"
+          chmod +x "$out/Installer Switch-OS.command" "$out"/*.py
+          # A zip keeps the executable bit of the .command file on the Mac
+          (cd dist/Switch-OS-Mac && zip -qr ../Switch-OS-Mac.zip Switch-OS)
       - uses: actions/upload-artifact@v4
         with:
-          name: Switch-OS
+          name: Switch-OS-Mac
           retention-days: 7
-          path: dist/Switch-OS.zip
+          path: dist/Switch-OS-Mac.zip
+      # What the Windows job needs (firmware, games, NumWorks' dfu.py): kept 1 day
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-files
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            installer/firmware
+            installer/numworks
+            installer/games
+
+  windows:
+    # The Windows installer is a real .exe, built on Windows (like NumSocial):
+    # Python, pyusb and the libusb DLL inside, nothing to install on the PC.
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-files
+          path: installer
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PyInstaller, pyusb and libusb
+        run: python -m pip install pyinstaller pyusb libusb-package
+      - name: Build the .exe and run its self-test
+        run: python scripts/build-windows-installer.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Switch-OS-Windows
+          retention-days: 7
+          path: dist/Switch-OS-Windows

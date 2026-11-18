@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-install NWA games into the PSP-OS external apps area (slot B).
+"""Pre-install NWA games into the Switch-OS external apps area (slot B).
 
 Does what NumWorks' nwlink does when installing an app from the website: link
 each relocatable .nwa together with the EADK runtime at its final flash
@@ -15,13 +15,19 @@ Needs arm-none-eabi-gcc only when there is at least one game.
 """
 
 import argparse
+import glob
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+import sys
+
+# Next to the .exe in the Windows installer (PyInstaller), else next to this file
+HERE = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent)
 SECTOR = 0x10000  # Config::ExternalAppsSectorUnit on n0120
 TRAMPOLINE = 0x0807FC00  # TrampolineOrigin (bootloader, internal flash)
 CPU = ["-mcpu=cortex-m7", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv5-d16"]
@@ -29,25 +35,47 @@ CPU = ["-mcpu=cortex-m7", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv5-d16"]
 
 def tool(name):
     path = shutil.which(name)
-    if path is None:
-        for prefix in ("/opt/homebrew/bin", "/usr/local/bin",
-                       "/Applications/ArmGNUToolchain/bin"):
-            candidate = os.path.join(prefix, name)
+    if path is not None:
+        return path
+    exe = name + (".exe" if os.name == "nt" else "")
+    patterns = ["/opt/homebrew/bin", "/usr/local/bin",
+                "/Applications/ArmGNUToolchain/*/arm-none-eabi/bin",
+                "/Applications/ArmGNUToolchain/bin"]
+    if os.name == "nt":
+        for root in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
+            patterns.append(os.path.join(root, "Arm GNU Toolchain arm-none-eabi", "*", "bin"))
+            patterns.append(os.path.join(root, "GNU Arm Embedded Toolchain", "*", "bin"))
+    for pattern in patterns:
+        for directory in sorted(glob.glob(pattern), reverse=True):
+            candidate = os.path.join(directory, exe)
             if os.path.exists(candidate):
                 return candidate
-        raise SystemExit(f"{name} introuvable : installe la chaîne ARM "
-                         "(brew install --cask gcc-arm-embedded).")
-    return path
+    raise SystemExit(f"{name} introuvable : installe la chaîne ARM "
+                     "(Arm GNU Toolchain : brew install --cask gcc-arm-embedded "
+                     "sur Mac, ou l'installateur Windows sur developer.arm.com).")
 
 
 def symbols(elf):
-    out = subprocess.run([tool("arm-none-eabi-nm"), elf], check=True,
-                         capture_output=True, text=True).stdout
+    """Symbol table of an ELF32 little-endian file, read in Python (no nm
+    needed, so this also works on Windows without the ARM toolchain)."""
+    data = Path(elf).read_bytes()
+    shoff, = struct.unpack_from("<I", data, 0x20)
+    shentsize, shnum = struct.unpack_from("<HH", data, 0x2E)
+    sections = [struct.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize)
+                for i in range(shnum)]
     table = {}
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) == 3:
-            table[parts[2]] = int(parts[0], 16)
+    for sh in sections:
+        if sh[1] != 2:  # SHT_SYMTAB
+            continue
+        strtab = sections[sh[6]]
+        for off in range(sh[4], sh[4] + sh[5], 16):
+            name_off, value = struct.unpack_from("<II", data, off)
+            if name_off == 0:
+                continue
+            start = strtab[4] + name_off
+            name = data[start:data.index(b"\0", start)].decode("ascii", "replace")
+            table[name] = value
     return table
 
 
@@ -66,13 +94,13 @@ def linker_script(template, flash_start, flash_length, ram_start, ram_length):
     return ld
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("userland_elf")
     parser.add_argument("games_dir")
     parser.add_argument("out_bin")
     parser.add_argument("--eadk", default=str(HERE / "numworks" / "eadk"))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     games = sorted(Path(args.games_dir).glob("*.nwa"), key=lambda p: p.name.lower())
     image = bytearray()
@@ -83,20 +111,20 @@ def main():
         ram_start = (sym["_external_apps_RAM_start"] + 7) & ~7
         ram_end = sym["_external_apps_RAM_end"]
         eadk_obj = os.path.join(args.eadk, "eadk.o")
-        template = Path(args.eadk, "linker.ld").read_text()
+        template = Path(args.eadk, "linker.ld").read_text(encoding="utf-8")
         with tempfile.TemporaryDirectory() as tmp:
             for game in games:
                 address = area_start + len(image)
                 ld_path = os.path.join(tmp, "app.ld")
                 Path(ld_path).write_text(linker_script(
                     template, address, area_end - address, ram_start,
-                    ram_end - ram_start))
+                    ram_end - ram_start), encoding="utf-8")
                 elf = os.path.join(tmp, "app.elf")
                 binary = os.path.join(tmp, "app.bin")
                 subprocess.run([tool("arm-none-eabi-gcc"), *CPU, "-nostartfiles",
                                 "-nostdlib", "-T", ld_path, "-Wl,--gc-sections",
                                 "-Wl,-e,_start", "-Wl,--no-warn-rwx-segments",
-                                str(game), eadk_obj, "-lgcc", "-o", elf],
+                                str(game), eadk_obj, "-lgcc", "-lc", "-lgcc", "-o", elf],
                                check=True)
                 subprocess.run([tool("arm-none-eabi-objcopy"), "-O", "binary",
                                 elf, binary], check=True)

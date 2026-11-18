@@ -9,6 +9,9 @@
 #        installer/firmware/  switch-os.B.dfu + switch-os.B.elf (symbols, for games)
 #        installer/numworks/  NumWorks' dfu.py, and the EADK runtime to link
 #                             .nwa games at their address in slot B
+#   5. if games/ holds .nwa games, copies them to installer/games/ and
+#      pre-links them (installer/firmware/games.bin + games.json), so that
+#      installing them needs no ARM toolchain (Windows PCs)
 #
 # Nothing from NumWorks is stored in this repository: their code is fetched
 # from their own repository and only ever lives on your machine.
@@ -36,25 +39,25 @@ if ! command -v arm-none-eabi-gcc >/dev/null; then
   exit 1
 fi
 
-say "1/4  Sources officielles d'Epsilon ($COMMIT)"
+say "1/5  Sources officielles d'Epsilon ($COMMIT)"
 if [ ! -d "$SRC/.git" ]; then
   # Without blobs first: only the files of the pinned commit get downloaded.
   git clone --filter=blob:none --no-checkout https://github.com/numworks/epsilon.git "$SRC"
 fi
 git -C "$SRC" fetch --quiet origin "$COMMIT" 2>/dev/null || true
 git -C "$SRC" checkout --quiet --force "$COMMIT"
-git -C "$SRC" clean -fdq -e output
+git -C "$SRC" clean -fdq -e output -e .venv
 
-say "2/4  Application du patch Switch-OS"
+say "2/5  Application du patch Switch-OS"
 git -C "$SRC" apply --whitespace=nowarn "$ROOT/patches/switch-os-epsilon.patch"
 
-say "3/4  Environnement Python de compilation"
+say "3/5  Environnement Python de compilation"
 [ -x "$VENV/bin/python3" ] || python3 -m venv "$VENV"
 "$VENV/bin/pip" -q install setuptools lz4 pypng pyelftools stringcase parse rich black
 ln -sfn "$VENV" "$SRC/.venv"
 ln -sfn ../.venv "$SRC/epsilon/.venv"
 
-say "4/4  Compilation de Switch-OS ($MODEL, slot B) : quelques minutes"
+say "4/5  Compilation de Switch-OS ($MODEL, slot B) : quelques minutes"
 PATH="$VENV/bin:$PATH" "$MAKE_BIN" -C "$SRC/epsilon" PLATFORM="$MODEL" \
   PYTHON="$VENV/bin/python3" -j"$JOBS" userland.allow3rdparty.B.dfu >"$ROOT/.build.log" 2>&1 \
   || { tail -30 "$ROOT/.build.log"; echo "Échec, voir .build.log"; exit 1; }
@@ -72,7 +75,7 @@ cp -R "$SRC/epsilon/tools/device/usb" "$OUT/numworks/usb"
 # EADK runtime for the games, as one relocatable object + its linker script
 EADK="$SRC/epsilon/eadk"
 TMP="$(mktemp -d)"
-CPU="-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -DPLATFORM_DEVICE=1 -ffunction-sections -fdata-sections"
+CPU="-mcpu=cortex-m7 -mthumb -mfloat-abi=hard -mfpu=fpv5-d16 -Os -fno-tree-loop-distribute-patterns -DPLATFORM_DEVICE=1 -ffunction-sections -fdata-sections"
 INC="-I$EADK/include -I$SRC/shared -I$SRC/shared/ion/src/device"
 # shellcheck disable=SC2086
 arm-none-eabi-gcc $CPU $INC -c "$EADK/src/platform.c" -o "$TMP/platform.o"
@@ -84,5 +87,31 @@ arm-none-eabi-ld -r "$TMP/platform.o" "$TMP/svc.o" "$TMP/trampoline.o" -o "$OUT/
 cp "$EADK/src/linker.ld" "$OUT/numworks/eadk/linker.ld"
 rm -rf "$TMP"
 
+say "5/5  Jeux"
+rm -f "$OUT/firmware/games.bin" "$OUT/firmware/games.json"
+shopt -s nullglob
+GAMES=("$ROOT"/games/*.nwa)
+if [ ${#GAMES[@]} -gt 0 ]; then
+  cp "${GAMES[@]}" "$OUT/games/"
+fi
+INSTALLED=("$OUT"/games/*.nwa)
+if [ ${#INSTALLED[@]} -gt 0 ]; then
+  "$VENV/bin/python3" "$OUT/link_games.py" "$OUT/firmware/switch-os.B.elf" \
+    "$OUT/games" "$OUT/firmware/games.bin"
+  "$VENV/bin/python3" - "$OUT" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+out = Path(sys.argv[1])
+games = [{"name": p.name, "sha1": hashlib.sha1(p.read_bytes()).hexdigest()}
+         for p in sorted((out / "games").glob("*.nwa"))]
+(out / "firmware" / "games.json").write_text(json.dumps({"games": games}, indent=1))
+PY
+  echo "${#INSTALLED[@]} jeu(x) préparé(s)."
+else
+  echo "Aucun jeu (mets des .nwa dans games/ pour les inclure)."
+fi
+
 say "Switch-OS est prêt dans installer/."
-echo "Double-clique sur « installer/Installer Switch-OS.command » (ou : python3 installer/server.py)."
+echo "Mac : double-clique sur « installer/Installer Switch-OS.command » (ou : python3 installer/server.py)."
+echo "Windows : l'installateur .exe se fait sur un PC Windows avec scripts/build-windows-installer.py,"
+echo "          ou dans ta copie privée sur GitHub (Actions > Build Switch-OS)."
