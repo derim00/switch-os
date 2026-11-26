@@ -1,5 +1,7 @@
 # Switch-OS : le menu HOME de la Switch sur NumWorks
 
+[Readme in English](README.md)
+
 **Switch-OS remplace l'écran d'accueil de la calculatrice NumWorks (n0110, n0115 ou n0120) par
 un menu inspiré du menu HOME de la Nintendo Switch** : tes jeux `.nwa` en
 grandes vignettes au centre, les applis de la calculatrice en boutons ronds en
