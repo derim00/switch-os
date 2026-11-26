@@ -1,7 +1,9 @@
 # Switch-OS: the Switch HOME menu on NumWorks
 
+[Readme en Français](https://github.com/derim00/switch-os/README_fr.md)
+
 **Switch-OS replaces the home screen of the NumWorks calculator (n0110, n0115 or n0120) with a menu inspired by the Nintendo Switch HOME menu**: your `.nwa` games as large tiles in the center, the calculator's apps as round buttons at the bottom, and a "HOME Menu / Ⓐ Continue" screen at startup.
-[Français](https://github.com/derim00/switch-os/README_fr.md)
+
 ![Switch-OS preview](docs/apercu.png)
 
 <p align="center"><img src="docs/navigation.gif" alt="Navigating Switch-OS" width="480"></p>
