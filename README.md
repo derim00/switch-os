@@ -110,8 +110,8 @@ les vérifier, puis installe Switch-OS et le démarre.
 ## À savoir
 
 - **Calculatrice** : NumWorks **n0110**, **n0115** ou **n0120**, avec le logiciel officiel
-  **26.4.0** dans le slot A. Switch-OS est compilé à partir d'Epsilon 26.1 (la
-  dernière version publiée) avec le numéro de version 26.4.0.
+  **26.4.1** dans le slot A. Switch-OS est compilé à partir d'Epsilon 26.1 (la
+  dernière version publiée) avec le numéro de version 26.4.1.
 - **Trois modèles** : la compilation produit un firmware par modèle
   (n0110, n0115, n0120) et l'installateur choisit tout seul celui de la
   calculatrice branchée. Mets d'abord ta calculatrice à jour sur
